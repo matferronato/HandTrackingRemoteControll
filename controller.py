@@ -2,6 +2,7 @@ from handDetector import HandDetector
 import cv2
 import math
 import numpy as np
+import serial
 
 
 
@@ -17,8 +18,33 @@ devices = AudioUtilities.GetSpeakers()
 interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
 volume = cast(interface, POINTER(IAudioEndpointVolume))
 
+class ControllerSerial():
+    def __init__(self, defaultPort = "COM9", baudrate = 9600):
+        self.thisSerial = serial.Serial(defaultPort, baudrate)
+        self.dictCommands = {"volumeUp" : "aa", "volumeDown" : "bb", "confirmation" : "cc", "menu" : "dd", "arrowUp" : "ee", "arrowDown" : "ff", "arrowLeft" : "gg", "arrowRight" : "hh",}
+
+    def writeUart(self, message):
+        characteres = self.dictCommands [message]
+        characteres = bytes(characteres, 'ascii')
+        self.thisSerial.write(characteres)
+
 class RemoteControll():
-    def __init__(self, buttonModeThresholdeMin = 30,buttonModeThresholdeMax = 50, expected=50, offset=20, timer=50, volumeUpMin = 10, volumeUpMax = 90, volumeDownMin = 20, volumeDownMax = 90):
+    def __init__(self, 
+        buttonModeThresholdeMin = 30,
+        buttonModeThresholdeMax = 50, 
+        expected=50, 
+        offset=20, 
+        timer=50, 
+        volumeUpMin = 10, 
+        volumeUpMax = 90, 
+        volumeDownMin = 20, 
+        volumeDownMax = 90,
+        menuMin = 10, 
+        menuMax = 90,
+        confirmationMin = 20, 
+        confirmationMax = 90,        
+        ):
+        self.controller = ControllerSerial()
         self.counter = 0
         self.expected = expected
         self.offset = offset
@@ -40,8 +66,15 @@ class RemoteControll():
         self.volumeDownMax = volumeDownMax
         self.volumeUpMin = volumeUpMin
         self.volumeUpMax = volumeUpMax
+        self.menuMin = menuMin 
+        self.menuMax = menuMax
+        self.confirmationMin = confirmationMin 
+        self.confirmationMax = confirmationMax 
+        self.menuPressed = False
+        self.confirmationPressed = False
         self.downPressed = False
         self.upPressed = False
+        self.arrowPressed = False
         #Actions
         self.trigger = False
         self.runningText = ""
@@ -61,12 +94,14 @@ class RemoteControll():
             self.runningRoutine()
     
     def runningRoutine(self):
-        triangle, dummy = self.getTrianglePoints()
-        lengthVolumeUp, lengthVolumeDown, lengthInBetween = self.getVolumeDistances(triangle)
-        self.checkMode(lengthVolumeUp, lengthVolumeDown, lengthInBetween)
         cv2.putText(image, "Calibrated! "+self.buttonMode, (30,40), cv2.FONT_HERSHEY_COMPLEX, 1, (0,255,0), 2)
+        triangle, dummy = self.getTrianglePoints()
+        lenghtMenu, lenghtConfirmation = self.getMenuDistances()
+        print(lenghtMenu, lenghtConfirmation)
+        lengthVolumeUp, lengthVolumeDown, lengthInBetween = self.getVolumeDistances(triangle)
+        self.checkMode(lengthVolumeUp, lengthVolumeDown, lengthInBetween, lenghtConfirmation)
         if (self.buttonMode == "Volume"):
-            self.senseButtonPressed(lengthVolumeUp, lengthVolumeDown)
+            self.senseButtonPressed(lengthVolumeUp, lengthVolumeDown, lenghtMenu, lenghtConfirmation)
             if(self.draw):
                 self.drawnControllLines(triangle)
         else:
@@ -77,13 +112,13 @@ class RemoteControll():
                 self.drawnControllCircle(centerX, centerY, maxRadius)
         self.runAction()
 
-    def checkMode(self, lengthVolumeUp, lengthVolumeDown, lengthInBetween):
+    def checkMode(self, lengthVolumeUp, lengthVolumeDown, lengthInBetween, lenghtMenu):
         if (self.buttonMode == "Volume"):
-            if lengthInBetween < self.buttonModeThresholdeMin and lengthVolumeUp < self.buttonModeThresholdeMin and lengthVolumeDown < self.buttonModeThresholdeMin:
+            if lengthInBetween < self.buttonModeThresholdeMin and lengthVolumeUp < self.buttonModeThresholdeMin and lengthVolumeDown < self.buttonModeThresholdeMin and lenghtMenu < self.buttonModeThresholdeMin:
+                self.findCalibratedCenter()
                 self.buttonMode = "Arrows"
         else:
-            if lengthInBetween > self.buttonModeThresholdeMax and lengthVolumeUp > self.buttonModeThresholdeMax and lengthVolumeDown > self.buttonModeThresholdeMax:
-                self.findCalibratedCenter()
+            if lengthInBetween > self.buttonModeThresholdeMax and lengthVolumeUp > self.buttonModeThresholdeMax and lengthVolumeDown > self.buttonModeThresholdeMax and lenghtMenu > self.buttonModeThresholdeMax:
                 self.buttonMode = "Volume"            
 
     def findSwipeCenter(self, triangle):
@@ -97,14 +132,28 @@ class RemoteControll():
         return centerX, centerY, maxRadius
                 
     def senseSwipe(self, centerX, centerY, maxRadius):
-        if centerX < self.calibratedCenterX-self.calibratedMaxRadius:
-            self.pressButton("left arrow ")
-        elif centerX > self.calibratedCenterX+self.calibratedMaxRadius:
-            self.pressButton("right arrow ")
-        elif centerY < self.calibratedCenterY-self.calibratedMaxRadius:
-            self.pressButton("up arrow ")
-        elif centerY > self.calibratedCenterY+self.calibratedMaxRadius:
-            self.pressButton("down arrow")
+        if(self.arrowPressed):
+            if centerX > self.calibratedCenterX-self.calibratedMaxRadius and centerX < self.calibratedCenterX+self.calibratedMaxRadius:
+                if centerY > self.calibratedCenterY-self.calibratedMaxRadius and centerY < self.calibratedCenterY+self.calibratedMaxRadius:
+                    self.arrowPressed  = False        
+        else:
+            if centerX < self.calibratedCenterX-self.calibratedMaxRadius:
+                self.pressButton("right arrow ")
+                self.controller.writeUart("arrowRight")
+
+                self.arrowPressed  = True
+            elif centerX > self.calibratedCenterX+self.calibratedMaxRadius:
+                self.pressButton("left arrow ")
+                self.controller.writeUart("arrowLeft") 
+                self.arrowPressed  = True
+            elif centerY < self.calibratedCenterY-self.calibratedMaxRadius:
+                self.pressButton("up arrow ")
+                self.controller.writeUart("arrowUp")
+                self.arrowPressed  = True
+            elif centerY > self.calibratedCenterY+self.calibratedMaxRadius:
+                self.pressButton("down arrow")
+                self.controller.writeUart("arrowDown")
+                self.arrowPressed  = True
 
 
     def runAction(self):
@@ -115,7 +164,7 @@ class RemoteControll():
                 self.trigger = False
                 self.runningCounter = 0
             
-    def senseButtonPressed(self, lengthVolumeUp, lengthVolumeDown):
+    def senseButtonPressed(self, lengthVolumeUp, lengthVolumeDown, lenghtMenu, lenghtConfirmation):
         if(self.upPressed):
             if lengthVolumeUp > self.volumeUpMax:
                 self.upPressed = False
@@ -124,6 +173,8 @@ class RemoteControll():
                 print("up ", lengthVolumeUp, lengthVolumeDown, self.volumeUpMin)
                 self.upPressed = True
                 self.pressButton("volume +")
+                self.controller.writeUart("volumeUp")                
+        
         if(self.downPressed):
             if lengthVolumeDown > self.volumeDownMax:
                 self.downPressed = False
@@ -132,8 +183,26 @@ class RemoteControll():
                 print("down ", lengthVolumeUp, lengthVolumeDown, self.volumeDownMin)
                 self.downPressed = True
                 self.pressButton("volume -")
+                self.controller.writeUart("volumeDown") 
+        
+        if(self.menuPressed):
+            if lenghtMenu > self.menuMax:
+                self.menuPressed = False
+        else:
+            if lenghtMenu < self.menuMin:
+                self.menuPressed = True
+                self.pressButton("Menu")  
+                self.controller.writeUart("menu")                
+        
+        if(self.confirmationPressed):
+            if lenghtConfirmation > self.confirmationMax:
+                self.confirmationPressed = False
+        else:
+            if lenghtConfirmation < self.confirmationMin:
+                self.confirmationPressed = True
+                self.pressButton("Confirm")
+                self.controller.writeUart("confirmation")
                 
-
     def pressButton(self, action):
         self.runningText = action
         self.trigger = True
@@ -143,6 +212,14 @@ class RemoteControll():
         #else:
         #    volume.SetMasterVolumeLevel(currentVolumeDb + 1.0, None)
             
+
+    def getMenuDistances(self):
+        x1, y1 = handLandmarks[16][1], handLandmarks[16][2]
+        x2, y2 = handLandmarks[20][1], handLandmarks[20][2]         
+        x3, y3 = handLandmarks[4][1], handLandmarks[4][2]    
+        lenghtMenu = math.hypot(x3-x1, y3-y1)
+        lenghtConfirmation = math.hypot(x3-x2, y3-y2)
+        return lenghtMenu, lenghtConfirmation
 
     def getVolumeDistances(self, triangle):
         volumeUp = triangle[0]
@@ -176,12 +253,17 @@ class RemoteControll():
     def changeStateCalibrate(self):
         if self.counter == self.timer:
             self.state = self.transitions[self.state]
-            self.findCalibratedCenter()
+            #self.findCalibratedCenter()
 
     def findCalibratedCenter(self):
-        self.calibratedCenterY =  (handLandmarks[0][2] + handLandmarks[12][2]) / 2
-        self.calibratedCenterX =  (handLandmarks[4][1] + handLandmarks[20][1]) / 2
-        self.calibratedMaxRadius = ((handLandmarks[0][2] - handLandmarks[12][2])/2)        
+        self.calibratedCenterY =  (handLandmarks[4][2] + handLandmarks[12][2]) / 2
+        self.calibratedCenterX =  (handLandmarks[8][1] + handLandmarks[20][1]) / 2
+        self.calibratedMaxRadius = ((handLandmarks[0][2] - handLandmarks[12][2])/2)      
+        self.calibratedMaxRadius = self.calibratedMaxRadius  if self.calibratedMaxRadius > 0 else 0
+        #self.calibratedCenterY =  (handLandmarks[0][2] + handLandmarks[12][2]) / 2
+        #self.calibratedCenterX =  (handLandmarks[4][1] + handLandmarks[20][1]) / 2
+        #self.calibratedMaxRadius = ((handLandmarks[0][2] - handLandmarks[12][2])/2)        
+        #self.calibratedMaxRadius = self.calibratedMaxRadius  if self.calibratedMaxRadius > 0 else 0
 
     def getCenter(self):
         centerY =  (handLandmarks[0][2] + handLandmarks[12][2]) / 2
@@ -231,7 +313,7 @@ class RemoteControll():
 rc = RemoteControll()
 while True:
     status, image = webcamFeed.read()
-    handLandmarks = handDetector.findHandLandMarks(image=image, draw=False)
+    handLandmarks = handDetector.findHandLandMarks(image=image, draw=True)
     if(len(handLandmarks) != 0):    
         rc.checkAction()
 
