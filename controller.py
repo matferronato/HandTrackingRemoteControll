@@ -44,7 +44,9 @@ class RemoteControll():
         confirmationMin = 20, 
         confirmationMax = 90,        
         ):
-        self.controller = ControllerSerial()
+        
+        #self.controller = ControllerSerial()
+        self.debugMode = True
         self.counter = 0
         self.expected = expected
         self.offset = offset
@@ -52,6 +54,9 @@ class RemoteControll():
         self.buttonModeThresholdeMin = buttonModeThresholdeMin        
         self.buttonModeThresholdeMax = buttonModeThresholdeMax        
         self.buttonMode = "Volume"        
+        #Reset
+        self.counterReset = 0
+        self.resetMaxTime = 300
         #Text
         self.textDelay = 33
         self.textCounter = 0
@@ -60,7 +65,8 @@ class RemoteControll():
         #Calibrated
         self.calibratedCenterX = 0
         self.calibratedCenterY = 0
-        self.calibratedMaxRadius = 0
+        self.calibratedMaxRadiusX = 0
+        self.calibratedMaxRadiusY = 0
         #Thresholds
         self.volumeDownMin = volumeDownMin
         self.volumeDownMax = volumeDownMax
@@ -97,8 +103,8 @@ class RemoteControll():
         cv2.putText(image, "Calibrated! "+self.buttonMode, (30,40), cv2.FONT_HERSHEY_COMPLEX, 1, (0,255,0), 2)
         triangle, dummy = self.getTrianglePoints()
         lenghtMenu, lenghtConfirmation = self.getMenuDistances()
-        print(lenghtMenu, lenghtConfirmation)
         lengthVolumeUp, lengthVolumeDown, lengthInBetween = self.getVolumeDistances(triangle)
+        print(lenghtMenu, lenghtConfirmation, lengthInBetween)
         self.checkMode(lengthVolumeUp, lengthVolumeDown, lengthInBetween, lenghtConfirmation)
         if (self.buttonMode == "Volume"):
             self.senseButtonPressed(lengthVolumeUp, lengthVolumeDown, lenghtMenu, lenghtConfirmation)
@@ -106,7 +112,7 @@ class RemoteControll():
                 self.drawnControllLines(triangle)
         else:
             centerX, centerY, maxRadius = self.findSwipeCenter(triangle)
-            cv2.circle(image, (int(self.calibratedCenterX), int(self.calibratedCenterY)), int(self.calibratedMaxRadius),(0,255,0),  int(self.calibratedMaxRadius/10))
+            cv2.ellipse(image, (int(self.calibratedCenterX), int(self.calibratedCenterY)), (int(self.calibratedMaxRadiusX), int(self.calibratedMaxRadiusY)),0,0,360,(0,255,0),  int(self.calibratedMaxRadiusX/10))
             self.senseSwipe(centerX, centerY, maxRadius)
             if(self.draw):
                 self.drawnControllCircle(centerX, centerY, maxRadius)
@@ -133,26 +139,29 @@ class RemoteControll():
                 
     def senseSwipe(self, centerX, centerY, maxRadius):
         if(self.arrowPressed):
-            if centerX > self.calibratedCenterX-self.calibratedMaxRadius and centerX < self.calibratedCenterX+self.calibratedMaxRadius:
-                if centerY > self.calibratedCenterY-self.calibratedMaxRadius and centerY < self.calibratedCenterY+self.calibratedMaxRadius:
+            if centerX > self.calibratedCenterX-self.calibratedMaxRadiusX and centerX < self.calibratedCenterX+self.calibratedMaxRadiusX:
+                if centerY > self.calibratedCenterY-self.calibratedMaxRadiusY and centerY < self.calibratedCenterY+self.calibratedMaxRadiusY:
                     self.arrowPressed  = False        
         else:
-            if centerX < self.calibratedCenterX-self.calibratedMaxRadius:
+            if centerX < self.calibratedCenterX-self.calibratedMaxRadiusX:
                 self.pressButton("right arrow ")
-                self.controller.writeUart("arrowRight")
-
+                if(not(self.debugMode)):
+                    self.controller.writeUart("arrowRight")
                 self.arrowPressed  = True
-            elif centerX > self.calibratedCenterX+self.calibratedMaxRadius:
+            elif centerX > self.calibratedCenterX+self.calibratedMaxRadiusX:
                 self.pressButton("left arrow ")
-                self.controller.writeUart("arrowLeft") 
+                if(not(self.debugMode)):
+                    self.controller.writeUart("arrowLeft") 
                 self.arrowPressed  = True
-            elif centerY < self.calibratedCenterY-self.calibratedMaxRadius:
+            elif centerY < self.calibratedCenterY-self.calibratedMaxRadiusY:
                 self.pressButton("up arrow ")
-                self.controller.writeUart("arrowUp")
+                if(not(self.debugMode)):
+                    self.controller.writeUart("arrowUp")
                 self.arrowPressed  = True
-            elif centerY > self.calibratedCenterY+self.calibratedMaxRadius:
+            elif centerY > self.calibratedCenterY+self.calibratedMaxRadiusY:
                 self.pressButton("down arrow")
-                self.controller.writeUart("arrowDown")
+                if(not(self.debugMode)):
+                    self.controller.writeUart("arrowDown")
                 self.arrowPressed  = True
 
 
@@ -173,7 +182,8 @@ class RemoteControll():
                 print("up ", lengthVolumeUp, lengthVolumeDown, self.volumeUpMin)
                 self.upPressed = True
                 self.pressButton("volume +")
-                self.controller.writeUart("volumeUp")                
+                if(not(self.debugMode)):
+                    self.controller.writeUart("volumeUp")                
         
         if(self.downPressed):
             if lengthVolumeDown > self.volumeDownMax:
@@ -183,7 +193,8 @@ class RemoteControll():
                 print("down ", lengthVolumeUp, lengthVolumeDown, self.volumeDownMin)
                 self.downPressed = True
                 self.pressButton("volume -")
-                self.controller.writeUart("volumeDown") 
+                if(not(self.debugMode)):               
+                    self.controller.writeUart("volumeDown") 
         
         if(self.menuPressed):
             if lenghtMenu > self.menuMax:
@@ -192,7 +203,8 @@ class RemoteControll():
             if lenghtMenu < self.menuMin:
                 self.menuPressed = True
                 self.pressButton("Menu")  
-                self.controller.writeUart("menu")                
+                if(not(self.debugMode)):                
+                    self.controller.writeUart("menu")                
         
         if(self.confirmationPressed):
             if lenghtConfirmation > self.confirmationMax:
@@ -201,7 +213,8 @@ class RemoteControll():
             if lenghtConfirmation < self.confirmationMin:
                 self.confirmationPressed = True
                 self.pressButton("Confirm")
-                self.controller.writeUart("confirmation")
+                if(not(self.debugMode)):
+                    self.controller.writeUart("confirmation")
                 
     def pressButton(self, action):
         self.runningText = action
@@ -253,17 +266,16 @@ class RemoteControll():
     def changeStateCalibrate(self):
         if self.counter == self.timer:
             self.state = self.transitions[self.state]
-            #self.findCalibratedCenter()
+            self.counter = 0
 
     def findCalibratedCenter(self):
         self.calibratedCenterY =  (handLandmarks[4][2] + handLandmarks[12][2]) / 2
         self.calibratedCenterX =  (handLandmarks[8][1] + handLandmarks[20][1]) / 2
-        self.calibratedMaxRadius = ((handLandmarks[0][2] - handLandmarks[12][2])/2)      
-        self.calibratedMaxRadius = self.calibratedMaxRadius  if self.calibratedMaxRadius > 0 else 0
-        #self.calibratedCenterY =  (handLandmarks[0][2] + handLandmarks[12][2]) / 2
-        #self.calibratedCenterX =  (handLandmarks[4][1] + handLandmarks[20][1]) / 2
-        #self.calibratedMaxRadius = ((handLandmarks[0][2] - handLandmarks[12][2])/2)        
-        #self.calibratedMaxRadius = self.calibratedMaxRadius  if self.calibratedMaxRadius > 0 else 0
+        self.calibratedMaxRadiusX = ((handLandmarks[0][2] - handLandmarks[12][2])/2)      
+        self.calibratedMaxRadiusX = self.calibratedMaxRadiusX  if self.calibratedMaxRadiusX > 0 else 0
+        self.calibratedMaxRadiusY = self.calibratedMaxRadiusX/2      
+        self.calibratedMaxRadiusY = self.calibratedMaxRadiusY  if self.calibratedMaxRadiusY > 0 else 0
+
 
     def getCenter(self):
         centerY =  (handLandmarks[0][2] + handLandmarks[12][2]) / 2
@@ -309,14 +321,25 @@ class RemoteControll():
             color = (0, 255, 0)
         cv2.circle(image, (int(centerX), int(centerY)), int(maxRadius), color, int(maxRadius/10))
          
-        
+ 
+    def waitReset(self):
+        self.counterReset += 1 if  self.counterReset < self.resetMaxTime else self.resetMaxTime
+        if self.counterReset > self.resetMaxTime:
+            self.state = "Calibrate"
+            self.counterReset = 0
+        else:
+            cv2.putText(image, "Reseting "+str(self.counterReset), (30,40), cv2.FONT_HERSHEY_COMPLEX, 1, (255,0,0), 2)
+            self.counterReset = self.counterReset+1
+    
 rc = RemoteControll()
 while True:
     status, image = webcamFeed.read()
-    handLandmarks = handDetector.findHandLandMarks(image=image, draw=True)
+    handLandmarks = handDetector.findHandLandMarks(image=image, draw=False)
     if(len(handLandmarks) != 0):    
         rc.checkAction()
-
+    else:
+        if not("Calibrate" in rc.state):
+            rc.waitReset()
         
     cv2.waitKey(1)    
     cv2.imshow('win1', image)
